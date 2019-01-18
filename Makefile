@@ -5,7 +5,7 @@ HUBUSER ?= local
 
 # build inside the Docker container, then make a runtime image
 docker:
-	docker build -t $(HUBUSER)/journaldtail .
+	docker build -t $(HUBUSER)/journaldtail:latest .
 
 journaldtail:
 	go build -o journaldtail main.go

@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/cortexproject/cortex/pkg/util/flagext"
@@ -21,8 +22,12 @@ import (
 )
 
 var lokiHostURL = "http://localhost:3100/api/prom/push"
+var debug = false
 
 func main() {
+	fmt.Printf("START\n")
+	log.Printf("STARTed\n")
+
 	var logger kitlog.Logger
 	logger = kitlog.NewLogfmtLogger(kitlog.NewSyncWriter(os.Stderr))
 	log.SetOutput(kitlog.NewStdlibAdapter(logger))
@@ -38,6 +43,13 @@ func main() {
 	if v, isSet := os.LookupEnv("LOKI_URL"); isSet {
 		lokiHostURL = v
 	}
+	if v, isSet := os.LookupEnv("DEBUG"); isSet {
+		if strings.ToLower(v) == "true" {
+			debug = true
+		}
+	}
+	fmt.Printf("DEBUG set to %v\n", debug)
+	log.Printf("DEBUG set to %v\n", debug)
 
 	cfg := promtail.ClientConfig{
 		URL: flagext.URLValue{
@@ -54,20 +66,30 @@ func main() {
 	}
 }
 
+// RFC3339NanoFixed is time.RFC3339Nano with nanoseconds padded using zeros to
+const RFC3339NanoFixed = "2006-01-02T15:04:05.000000000Z07:00"
+
 func TailLoop(reader *journald.Reader, writer *promtail.Client) error {
 	var lastTS time.Time
 	for {
 		r, err := reader.Next()
 		if err != nil {
-			return errors.Wrap(err, "could not get next journal entry")
+			time.Sleep(100 * time.Millisecond)
+			continue
 		}
 		if r != nil {
 			ls := ToLabelSet(r)
-			ts := journald.ToGolangTime(r.RealtimeTimestamp)
+			//ts := journald.ToGolangTime(r.RealtimeTimestamp)
+			ts := journald.ToGolangTime(r.MonotonicTimestamp)
 			msg := r.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE]
 
-			if ts.Before(lastTS) {
+			if !ts.After(lastTS) { // can't do "same time either"
 				log.Fatal(fmt.Sprintf("%s is before %s! Message: %s", ts, lastTS, msg))
+			}
+			//fmt.Printf("\nDEBUGSVEN - (%s)\n", ts.Format(RFC3339NanoFixed))
+			if debug {
+				//fmt.Printf("\nDEBUG - (%s) %s (%s)\n", ts.Format(RFC3339NanoFixed), msg, ts.Format(RFC3339NanoFixed))
+				fmt.Log(msg)
 			}
 			lastTS = ts
 			err = writer.Handle(ls, ts, msg)
